@@ -83,7 +83,7 @@ class App(ctk.CTk):
         browse_output_func = self._browse_directory if is_dir_output else lambda: self._browse_save_as(output_entry, filetypes=save_types)
         output_browse_btn = ctk.CTkButton(io_frame, text="Browse...", command=browse_output_func)
         output_browse_btn.grid(row=1, column=2, padx=5, pady=5)
-        io_frame.column_configure(1, weight=1)
+        io_frame.columnconfigure(1, weight=1)
         return io_frame, input_entry, output_entry
 
     def _start_task(self, worker_func):
