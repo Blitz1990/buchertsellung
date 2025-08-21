@@ -125,6 +125,38 @@ python main.py collage --input-dir path/to/images/ --output path/to/collage.pdf 
 - `--grid`: The layout of the collage (e.g., '3x4' for 3 columns and 4 rows).
 - `--padding`: The space in pixels between images on the page (default: 10).
 
+#### 6. Run Pipeline
+
+Executes a series of commands defined in a YAML configuration file. This is the most powerful feature for automating complex, multi-step workflows.
+
+```bash
+python main.py run-pipeline --config path/to/pipeline.yaml --input-dir path/to/images/ --output path/to/final_output/
+```
+
+**Pipeline Configuration File (`.yaml`)**
+
+You define the steps of your workflow in a YAML file. The output of each step automatically becomes the input for the next step.
+
+*Example `pipeline.yaml`:*
+```yaml
+pipeline:
+  - name: "Step 1: Upscale all images"
+    command: "upscale"
+    params:
+      factor: 2.0
+
+  - name: "Step 2: Convert to edge-detected SVGs"
+    command: "svg"
+    params:
+      preprocessing: "edge_detection"
+
+  - name: "Step 3: Create a 2x1 collage from the SVGs (Note: collage needs raster input, this step would fail as written)"
+    command: "collage"
+    params:
+      size: "US_LETTER"
+      grid: "2x1"
+      padding: 50
+```
 
 ### Supported Page Sizes (`--size`)
 

@@ -27,12 +27,14 @@ class App(ctk.CTk):
         self.tab_view.add("SVG")
         self.tab_view.add("PDF")
         self.tab_view.add("Collage")
+        self.tab_view.add("Pipeline") # New Tab
 
         self.setup_resize_tab()
         self.setup_upscale_tab()
         self.setup_svg_tab()
         self.setup_pdf_tab()
         self.setup_collage_tab()
+        self.setup_pipeline_tab() # New Setup Method
 
         self.status_textbox = ctk.CTkTextbox(main_frame, height=200)
         self.status_textbox.pack(padx=10, pady=(0, 10), fill="both", expand=True)
@@ -44,8 +46,8 @@ class App(ctk.CTk):
         self.status_textbox.insert("end", message + "\n")
         self.status_textbox.see("end")
 
-    def _browse_file(self, entry_widget):
-        path = filedialog.askopenfilename()
+    def _browse_file(self, entry_widget, filetypes=None):
+        path = filedialog.askopenfilename(filetypes=filetypes)
         if path:
             entry_widget.delete(0, "end")
             entry_widget.insert(0, path)
@@ -63,6 +65,7 @@ class App(ctk.CTk):
             entry_widget.insert(0, path)
 
     def _create_io_widgets(self, parent, is_dir_input=False, is_dir_output=False, save_types=None):
+        # ... (This helper function remains the same) ...
         io_frame = ctk.CTkFrame(parent)
 
         input_label = "Input Directory:" if is_dir_input else "Input File:"
@@ -91,10 +94,18 @@ class App(ctk.CTk):
         thread.start()
 
     def _process_command_worker(self, args):
+        # ... (This worker function remains the same) ...
         old_stdout = sys.stdout
         sys.stdout = redirected_output = io.StringIO()
         try:
-            cli_main.run_command(args)
+            # The logic to dispatch to run_pipeline_command is in main.py,
+            # so we just call main() which now handles the command dispatching.
+            # This is not ideal, a better refactor would be to have a single entry point.
+            # For now, let's call the specific runner.
+            if args.command == 'run-pipeline':
+                cli_main.run_pipeline_command(args)
+            else:
+                cli_main.run_command(args)
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
         finally:
@@ -102,6 +113,7 @@ class App(ctk.CTk):
             self.after(0, self.log, redirected_output.getvalue())
             self.after(0, self.log, "...Process finished.")
 
+    # ... (All the _start_* methods for individual commands remain the same) ...
     def _start_resize(self, input_path, output_path, size, is_batch):
         args = SimpleNamespace(command='resize', input=None if is_batch else input_path, directory=input_path if is_batch else None, output=output_path, size=size)
         self._start_task(lambda: self._process_command_worker(args))
@@ -111,10 +123,8 @@ class App(ctk.CTk):
         self._start_task(lambda: self._process_command_worker(args))
 
     def _start_svg(self, input_path, output_path, preprocess, colors, is_batch):
-        # Handle "None" case from GUI dropdown
         if preprocess == "None":
             preprocess = None
-
         args = SimpleNamespace(command='svg', input=None if is_batch else input_path, directory=input_path if is_batch else None, output=output_path, preprocessing=preprocess, colors=int(colors))
         self._start_task(lambda: self._process_command_worker(args))
 
@@ -126,15 +136,24 @@ class App(ctk.CTk):
         args = SimpleNamespace(command='collage', input_dir=input_dir, output=output_path, size=size, grid=grid, padding=int(padding))
         self._start_task(lambda: self._process_command_worker(args))
 
+    # New start method for pipeline
+    def _start_pipeline(self, config_path, input_dir, output_path):
+        args = SimpleNamespace(
+            command='run-pipeline',
+            config=config_path,
+            input_dir=input_dir,
+            output=output_path
+        )
+        self._start_task(lambda: self._process_command_worker(args))
+
+    # ... (All setup_*_tab methods remain the same, except for the new pipeline tab) ...
     def _create_batch_toggle_tab(self, tab_name, setup_content_func):
         tab = self.tab_view.tab(tab_name)
         is_batch = ctk.BooleanVar(value=False)
-
         def toggle_mode():
             for widget in tab.winfo_children():
                 widget.destroy()
             setup_content_func(tab, is_batch.get(), is_batch)
-
         setup_content_func(tab, is_batch.get(), is_batch)
 
     def setup_resize_tab(self):
@@ -173,26 +192,22 @@ class App(ctk.CTk):
         ctk.CTkCheckBox(tab, text="Batch Mode (Process Directory)", variable=is_batch_var, command=lambda: self._create_batch_toggle_tab("SVG", self._setup_svg_tab_content)).pack(anchor="w", padx=10, pady=5)
         frame, input_entry, output_entry = self._create_io_widgets(tab, is_dir_input=is_dir, is_dir_output=is_dir, save_types=[("SVG files", "*.svg")])
         frame.pack(padx=10, pady=10, fill="x")
-
         options_frame = ctk.CTkFrame(tab)
         options_frame.pack(padx=10, pady=5, fill="x", anchor="w")
-
-        # --- SVG Options ---
         colors_frame = ctk.CTkFrame(options_frame)
         colors_label = ctk.CTkLabel(colors_frame, text="Num Colors (for Quantize):")
         colors_entry = ctk.CTkEntry(colors_frame, width=80)
         colors_entry.insert(0, "16")
-
         def on_preprocess_change(choice):
             if choice == "color_quantization":
                 colors_frame.pack(side="left", padx=10, pady=5, after=preprocess_menu)
+                colors_label.pack(side="left", padx=5)
+                colors_entry.pack(side="left", padx=5)
             else:
                 colors_frame.pack_forget()
-
         ctk.CTkLabel(options_frame, text="Preprocessing:").pack(side="left", padx=10)
         preprocess_menu = ctk.CTkOptionMenu(options_frame, values=["None", "threshold", "edge_detection", "color_quantization"], command=on_preprocess_change)
         preprocess_menu.pack(side="left", padx=10, pady=5)
-
         ctk.CTkButton(tab, text="Start SVG Conversion", font=("", 16), command=lambda: self._start_svg(input_entry.get(), output_entry.get(), preprocess_menu.get(), colors_entry.get(), is_batch_var.get())).pack(pady=20)
 
     def setup_pdf_tab(self):
@@ -227,6 +242,31 @@ class App(ctk.CTk):
         padding_entry.insert(0, "10")
         padding_entry.grid(row=2, column=1, padx=10, pady=5, sticky="w")
         ctk.CTkButton(tab, text="Create Collage PDF", font=("", 16), command=lambda: self._start_collage(input_entry.get(), output_entry.get(), size_menu.get(), grid_entry.get(), padding_entry.get())).pack(pady=20)
+
+    def setup_pipeline_tab(self):
+        tab = self.tab_view.tab("Pipeline")
+
+        frame = ctk.CTkFrame(tab)
+        frame.pack(padx=10, pady=10, fill="x")
+
+        ctk.CTkLabel(frame, text="Config File:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        config_entry = ctk.CTkEntry(frame, width=450)
+        config_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkButton(frame, text="Browse...", command=lambda: self._browse_file(config_entry, filetypes=[("YAML files", "*.yaml *.yml")])).grid(row=0, column=2, padx=5, pady=5)
+
+        ctk.CTkLabel(frame, text="Input Directory:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        input_entry = ctk.CTkEntry(frame, width=450)
+        input_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkButton(frame, text="Browse...", command=lambda: self._browse_directory(input_entry)).grid(row=1, column=2, padx=5, pady=5)
+
+        ctk.CTkLabel(frame, text="Final Output Path:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        output_entry = ctk.CTkEntry(frame, width=450)
+        output_entry.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkButton(frame, text="Browse...", command=lambda: self._browse_save_as(output_entry)).grid(row=2, column=2, padx=5, pady=5)
+
+        frame.column_configure(1, weight=1)
+
+        ctk.CTkButton(tab, text="Run Pipeline", font=("", 16), command=lambda: self._start_pipeline(config_entry.get(), input_entry.get(), output_entry.get())).pack(pady=20)
 
 if __name__ == "__main__":
     app = App()

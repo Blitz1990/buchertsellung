@@ -6,8 +6,10 @@ from fpdf import FPDF
 import argparse
 import glob
 from types import SimpleNamespace
+import yaml
+import tempfile
+import shutil
 
-# ... (all PAGE_SIZES and other constants remain the same) ...
 # Page dimensions at 300 DPI for image processing (Width x Height)
 PAGE_SIZES_PX = {
     "5x8": (1500, 2400),
@@ -51,9 +53,7 @@ PAGE_SIZES_IN = {
 BLEED_IN = 0.125
 DPI = 300
 
-# ... (all processing functions like load_image, resize_image_to_fit, etc. remain the same) ...
 def load_image(filepath: str) -> np.ndarray:
-    """Loads an image from a file path."""
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"Image file not found at: {filepath}")
     image = cv2.imread(filepath, cv2.IMREAD_UNCHANGED)
@@ -62,7 +62,6 @@ def load_image(filepath: str) -> np.ndarray:
     return image
 
 def save_image(image: np.ndarray, filepath: str):
-    """Saves an image to a file path."""
     output_dir = os.path.dirname(filepath)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -71,6 +70,37 @@ def save_image(image: np.ndarray, filepath: str):
         print(f"Image saved to {filepath}")
     except Exception as e:
         raise IOError(f"Could not save image to {filepath}: {e}")
+
+def preprocess_image(image: np.ndarray, processing_type: str, k: int = 16) -> np.ndarray:
+    if processing_type == 'threshold':
+        print("Applying threshold...")
+        if len(image.shape) == 3:
+            gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray_image = image
+        _, processed_image = cv2.threshold(gray_image, 127, 255, cv2.THRESH_BINARY)
+        return processed_image
+    elif processing_type == 'edge_detection':
+        print("Applying Canny edge detection...")
+        if len(image.shape) == 3:
+            gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray_image = image
+        blurred = cv2.GaussianBlur(gray_image, (5, 5), 0)
+        processed_image = cv2.Canny(blurred, 50, 150)
+        return processed_image
+    elif processing_type == 'color_quantization':
+        print(f"Applying color quantization with k={k}...")
+        pixels = image.reshape((-1, 3))
+        pixels = np.float32(pixels)
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.2)
+        _, labels, center = cv2.kmeans(pixels, k, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+        center = np.uint8(center)
+        quantized_image = center[labels.flatten()]
+        processed_image = quantized_image.reshape((image.shape))
+        return processed_image
+    else:
+        raise ValueError(f"Unknown preprocessing type: {processing_type}")
 
 def resize_image_to_fit(image: np.ndarray, target_size_str: str) -> np.ndarray:
     if target_size_str not in PAGE_SIZES_PX:
@@ -101,46 +131,6 @@ def upscale_image(image: np.ndarray, factor: float) -> np.ndarray:
     new_h = int(img_h * factor)
     upscaled_image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
     return upscaled_image
-
-def preprocess_image(image: np.ndarray, processing_type: str, k: int = 16) -> np.ndarray:
-    """Applies preprocessing to an image before SVG conversion."""
-    if processing_type == 'threshold':
-        print("Applying threshold...")
-        # Convert to grayscale if it's a color image
-        if len(image.shape) == 3:
-            gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        else:
-            gray_image = image
-        _, processed_image = cv2.threshold(gray_image, 127, 255, cv2.THRESH_BINARY)
-        return processed_image
-    elif processing_type == 'edge_detection':
-        print("Applying Canny edge detection...")
-        # Convert to grayscale if it's a color image
-        if len(image.shape) == 3:
-            gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        else:
-            gray_image = image
-        # Apply blur to reduce noise
-        blurred = cv2.GaussianBlur(gray_image, (5, 5), 0)
-        processed_image = cv2.Canny(blurred, 50, 150)
-        return processed_image
-    elif processing_type == 'color_quantization':
-        print(f"Applying color quantization with k={k}...")
-        # Reshape the image to be a list of pixels
-        pixels = image.reshape((-1, 3))
-        pixels = np.float32(pixels)
-
-        # Define criteria and apply kmeans()
-        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.2)
-        _, labels, center = cv2.kmeans(pixels, k, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
-
-        # Convert back to uint8 and make original image
-        center = np.uint8(center)
-        quantized_image = center[labels.flatten()]
-        processed_image = quantized_image.reshape((image.shape))
-        return processed_image
-    else:
-        raise ValueError(f"Unknown preprocessing type: {processing_type}")
 
 def convert_image_to_svg(image_path: str, svg_path: str):
     if not os.path.exists(image_path):
@@ -229,8 +219,78 @@ def create_kdp_pdf(image_path: str, pdf_path: str, target_size_str: str):
     pdf.output(pdf_path)
     print(f"KDP PDF created at: {pdf_path}")
 
+def run_pipeline_command(args: SimpleNamespace):
+    """Loads a pipeline config and runs the defined steps."""
+    if not os.path.exists(args.config):
+        raise FileNotFoundError(f"Pipeline config file not found: {args.config}")
+
+    with open(args.config, 'r') as f:
+        config = yaml.safe_load(f)
+
+    pipeline_steps = config.get('pipeline')
+    if not pipeline_steps:
+        raise ValueError("Pipeline config must contain a 'pipeline' key with a list of steps.")
+
+    temp_dir = tempfile.mkdtemp()
+    print(f"Created temporary pipeline directory: {temp_dir}")
+
+    current_input_dir = args.input_dir
+
+    try:
+        for i, step in enumerate(pipeline_steps):
+            step_name = step.get('name', f'Step {i+1}')
+            command = step.get('command')
+            params = step.get('params', {})
+            print(f"\n--- Running Pipeline Step: {step_name} ---")
+
+            step_output_dir = os.path.join(temp_dir, f"step_{i+1}_{command}")
+
+            step_args_dict = {'command': command, 'output': step_output_dir}
+
+            # Handle input for the step
+            if command == 'collage':
+                step_args_dict['input_dir'] = current_input_dir
+            else:
+                step_args_dict['directory'] = current_input_dir
+
+            step_args_dict.update(params)
+            step_args = SimpleNamespace(**step_args_dict)
+
+            run_command(step_args)
+            current_input_dir = step_output_dir
+
+        final_output_path = args.output
+        final_output_dir = os.path.dirname(final_output_path)
+        if final_output_dir and not os.path.exists(final_output_dir):
+            os.makedirs(final_output_dir)
+
+        # Copy the final results to the user-specified output path
+        final_output_path = args.output
+        if os.path.isdir(final_output_path):
+            # If the output path is a directory, remove it to start fresh
+            shutil.rmtree(final_output_path)
+        elif os.path.exists(final_output_path):
+            # If it's a file, remove it
+            os.remove(final_output_path)
+
+        # Check if the last step produced a single file or a directory
+        last_step_outputs = os.listdir(current_input_dir)
+        if len(last_step_outputs) == 1:
+            # If single file (e.g., from collage), copy that file
+            final_product_path = os.path.join(current_input_dir, last_step_outputs[0])
+            os.makedirs(os.path.dirname(final_output_path), exist_ok=True)
+            shutil.copy2(final_product_path, final_output_path)
+        else:
+            # If multiple files, copy the whole directory
+            shutil.copytree(current_input_dir, final_output_path)
+
+        print(f"\nPipeline complete. Final output saved to: {final_output_path}")
+
+    finally:
+        shutil.rmtree(temp_dir)
+        print(f"Cleaned up temporary pipeline directory: {temp_dir}")
+
 def run_command(args: SimpleNamespace):
-    """This function contains the core logic and is callable from other scripts."""
     try:
         if args.command == "collage":
             if not os.path.isdir(args.input_dir):
@@ -317,7 +377,6 @@ def run_command(args: SimpleNamespace):
         print(f"An unexpected error occurred: {e}")
 
 def main():
-    """Main function to drive the image processing tool via CLI."""
     parser = argparse.ArgumentParser(description="KDP Image Processing Tool. Provide a command and its options.")
     subparsers = parser.add_subparsers(dest="command", required=True, help="Available commands")
 
@@ -347,8 +406,18 @@ def main():
     parser_collage.add_argument("--grid", required=True, help="Grid layout (e.g., '3x4').")
     parser_collage.add_argument("--padding", type=int, default=10, help="Padding in pixels between images.")
 
+    # --- Pipeline command ---
+    parser_pipeline = subparsers.add_parser("run-pipeline", help="Run a series of processing steps from a config file.")
+    parser_pipeline.add_argument("--config", required=True, help="Path to the pipeline YAML config file.")
+    parser_pipeline.add_argument("--input-dir", required=True, help="Path to the initial directory of images.")
+    parser_pipeline.add_argument("--output", required=True, help="Path to save the final output.")
+
     args = parser.parse_args()
-    run_command(args)
+
+    if args.command == 'run-pipeline':
+        run_pipeline_command(args)
+    else:
+        run_command(args)
 
 if __name__ == "__main__":
     main()
