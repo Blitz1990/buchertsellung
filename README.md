@@ -17,6 +17,20 @@ This tool allows you to resize, upscale, and convert images, as well as generate
 
 ## Usage
 
+This tool can be run in two modes: Command-Line Interface (CLI) for scripting and automation, and a Graphical User Interface (GUI) for ease of use.
+
+### Graphical User Interface (GUI)
+
+To launch the user-friendly graphical interface, run the following command:
+
+```bash
+python gui.py
+```
+
+The GUI provides access to all the tool's features through a tabbed interface with buttons and forms.
+
+### Command-Line Interface (CLI)
+
 The tool is operated via the command line. The basic structure is:
 `python main.py <command> [options]`
 

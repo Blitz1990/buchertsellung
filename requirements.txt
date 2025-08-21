@@ -1,3 +1,4 @@
 opencv-python
 pixels2svg
 fpdf2
+customtkinter
