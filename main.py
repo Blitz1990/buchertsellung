@@ -102,10 +102,42 @@ def upscale_image(image: np.ndarray, factor: float) -> np.ndarray:
     upscaled_image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
     return upscaled_image
 
-def preprocess_image(image: np.ndarray, processing_type: str) -> np.ndarray:
+def preprocess_image(image: np.ndarray, processing_type: str, k: int = 16) -> np.ndarray:
+    """Applies preprocessing to an image before SVG conversion."""
     if processing_type == 'threshold':
-        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        print("Applying threshold...")
+        # Convert to grayscale if it's a color image
+        if len(image.shape) == 3:
+            gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray_image = image
         _, processed_image = cv2.threshold(gray_image, 127, 255, cv2.THRESH_BINARY)
+        return processed_image
+    elif processing_type == 'edge_detection':
+        print("Applying Canny edge detection...")
+        # Convert to grayscale if it's a color image
+        if len(image.shape) == 3:
+            gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray_image = image
+        # Apply blur to reduce noise
+        blurred = cv2.GaussianBlur(gray_image, (5, 5), 0)
+        processed_image = cv2.Canny(blurred, 50, 150)
+        return processed_image
+    elif processing_type == 'color_quantization':
+        print(f"Applying color quantization with k={k}...")
+        # Reshape the image to be a list of pixels
+        pixels = image.reshape((-1, 3))
+        pixels = np.float32(pixels)
+
+        # Define criteria and apply kmeans()
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.2)
+        _, labels, center = cv2.kmeans(pixels, k, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+
+        # Convert back to uint8 and make original image
+        center = np.uint8(center)
+        quantized_image = center[labels.flatten()]
+        processed_image = quantized_image.reshape((image.shape))
         return processed_image
     else:
         raise ValueError(f"Unknown preprocessing type: {processing_type}")
@@ -259,7 +291,8 @@ def run_command(args: SimpleNamespace):
                     if hasattr(args, 'preprocessing') and args.preprocessing:
                         print(f"Preprocessing image with: {args.preprocessing}")
                         image = load_image(input_path)
-                        processed_image = preprocess_image(image, args.preprocessing)
+                        num_colors = args.colors if hasattr(args, 'colors') else 16
+                        processed_image = preprocess_image(image, args.preprocessing, k=num_colors)
                         temp_image_path = f"temp_{base_name}.png"
                         save_image(processed_image, temp_image_path)
                         input_for_svg = temp_image_path
@@ -301,7 +334,8 @@ def main():
     parser_upscale.add_argument("--factor", required=True, type=float, help="Scaling factor (e.g., 2.5).")
 
     parser_svg = subparsers.add_parser("svg", help="Convert raster image(s) to SVG.", parents=[parent_parser])
-    parser_svg.add_argument("--preprocessing", choices=['threshold'], help="Apply preprocessing before converting.")
+    parser_svg.add_argument("--preprocessing", choices=['threshold', 'edge_detection', 'color_quantization'], help="Apply preprocessing before converting.")
+    parser_svg.add_argument("--colors", type=int, default=16, help="Number of colors for color quantization (default: 16).")
 
     parser_pdf = subparsers.add_parser("pdf", help="Create KDP-ready PDF(s) from image(s).", parents=[parent_parser])
     parser_pdf.add_argument("--size", required=True, choices=PAGE_SIZES_IN.keys(), help="Target page size for the PDF.")

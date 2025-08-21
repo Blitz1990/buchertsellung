@@ -80,9 +80,19 @@ Converts one or more raster images to SVG.
 python main.py svg --input path/to/image.png --output path/to/vector.svg
 ```
 
-**With Preprocessing (Threshold):**
+**With Preprocessing:**
+- `threshold`: Converts the image to a black-and-white line drawing.
+- `edge_detection`: Creates a line drawing based on the detected edges in the image.
+- `color_quantization`: Reduces the image to a limited palette of colors. Use the `--colors` argument to specify how many.
+
+*Example (Edge Detection):*
 ```bash
-python main.py svg --input path/to/image.png --output path/to/lineart.svg --preprocessing threshold
+python main.py svg --input path/to/image.png --output path/to/edges.svg --preprocessing edge_detection
+```
+
+*Example (Color Quantization):*
+```bash
+python main.py svg --input path/to/image.png --output path/to/quantized.svg --preprocessing color_quantization --colors 8
 ```
 
 **Batch Mode:**
